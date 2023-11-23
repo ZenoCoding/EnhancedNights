@@ -1,0 +1,4 @@
+name: EnhancedNights
+version: '${project.version}'
+main: me.tycho.enhancednights.EnhancedNights
+api-version: '1.20'
