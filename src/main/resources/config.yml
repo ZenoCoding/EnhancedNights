@@ -1,0 +1,9 @@
+# The update interval of the day/night cycle in ticks.
+update_interval: 10
+
+# Regen Mechanics
+night_light_level: 10
+night_multiplier: 0.5
+
+day_light_level:
+day_multiplier: 1.0
