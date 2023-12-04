@@ -5,11 +5,13 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.World;
-import org.bukkit.entity.Entity;
+import org.bukkit.block.Block;
+import org.bukkit.block.data.type.Bed;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityRegainHealthEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -45,16 +47,16 @@ public class DayNightCycle implements Listener {
      * - The current stage of the day/night cycle
      * - The light level of the player
      */
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerHeal(@NotNull EntityRegainHealthEvent event) {
-        if (event.getRegainReason() == org.bukkit.event.entity.EntityRegainHealthEvent.RegainReason.SATIATED) {
+        if (event.getRegainReason() == EntityRegainHealthEvent.RegainReason.SATIATED) {
             if (event.getEntity() instanceof Player player) {
-                if (player.getWorld().getEnvironment() == org.bukkit.World.Environment.NORMAL) {
+                if (player.getWorld().getEnvironment() == World.Environment.NORMAL) {
                     if (isNight()) {
                         // The player should heal with a factor proportional to the light level
                         int light = player.getLocation().getBlock().getLightLevel();
                         event.setAmount(event.getAmount() * (light / 15.0) * EnhancedNights.instance.getConfig().getDouble("night_multiplier"));
-                    } else if (isDay()) {
+                    } else {
                         // The light level required for max healing should be less
                         int light = player.getLocation().getBlock().getLightLevel();
                         event.setAmount(event.getAmount() * Math.max(1.0, light / 10.0));
@@ -71,25 +73,47 @@ public class DayNightCycle implements Listener {
      * Makes it impossible to sleep during the night
      * There are small windows of time where it is possible to sleep during sunset
      */
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onPlayerSleep(PlayerInteractEvent event) {
-        // List of all bed types
         Set<Material> beds = Set.of(Material.BLACK_BED, Material.BLUE_BED, Material.BROWN_BED, Material.CYAN_BED, Material.GRAY_BED, Material.GREEN_BED, Material.LIGHT_BLUE_BED, Material.LIGHT_GRAY_BED, Material.LIME_BED, Material.MAGENTA_BED, Material.ORANGE_BED, Material.PINK_BED, Material.PURPLE_BED, Material.RED_BED, Material.WHITE_BED, Material.YELLOW_BED);
 
-        if (event.getClickedBlock() != null && beds.contains(event.getClickedBlock().getType())) {
-            if (isNight() && event.getClickedBlock().getWorld().getEnvironment() == World.Environment.NORMAL) {
+        if (event.getAction() == Action.RIGHT_CLICK_BLOCK && event.getClickedBlock() != null && beds.contains(event.getClickedBlock().getType())) {
+            Block bedBlock = event.getClickedBlock();
+
+            // Check if the clicked block is the foot of the bed and find the head
+            if (bedBlock.getBlockData() instanceof Bed) {
+                Bed bed = (Bed) bedBlock.getBlockData();
+                if (bed.getPart() == Bed.Part.FOOT) {
+                    bedBlock = bedBlock.getRelative(bed.getFacing());
+                }
+            }
+
+            if (isNight() && bedBlock.getWorld().getEnvironment() == World.Environment.NORMAL) {
                 event.setCancelled(true);
-                // Create explosion
-                event.getClickedBlock().getWorld().createExplosion(event.getClickedBlock().getLocation(), 5, true, true);
+
+                // Remove the bed block to prevent item drop
+                bedBlock.setType(Material.AIR);
+
+                Block finalBedBlock = bedBlock;
+                new BukkitRunnable() {
+                    @Override
+                    public void run() {
+
+                        // Create explosion at the head of the bed
+                        finalBedBlock.getWorld().createExplosion(finalBedBlock.getLocation(), 5, true, true);
+                    }
+                }.runTaskLater(EnhancedNights.instance, 1L); // 1 tick delay to allow death event to be called after
+
                 // Track this explosion for custom death message
-                List<UUID> uuids = event.getClickedBlock().getLocation().getNearbyPlayers(5).stream().map(Entity::getUniqueId).toList();
+                List<UUID> uuids = bedBlock.getLocation().getNearbyPlayers(5).stream().map(Player::getUniqueId).toList();
                 recentBedExplosions.addAll(uuids);
-                new BukkitRunnable(){
+
+                new BukkitRunnable() {
                     @Override
                     public void run() {
                         uuids.forEach(recentBedExplosions::remove);
                     }
-                }.runTaskLater(EnhancedNights.instance, 5);
+                }.runTaskLater(EnhancedNights.instance, 100L); // 100 ticks delay (5 seconds)
             }
         }
     }
@@ -97,18 +121,16 @@ public class DayNightCycle implements Listener {
     /**
      * Handles custom death messages for bed explosions.
      */
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onEntityDamage(PlayerDeathEvent event) {
-
-        if (Objects.requireNonNull(event.getEntity().getLastDamageCause()).getCause() == EntityDamageEvent.DamageCause.BLOCK_EXPLOSION) {
+        if (event.getEntity().getLastDamageCause() != null &&
+                event.getEntity().getLastDamageCause().getCause() == EntityDamageEvent.DamageCause.BLOCK_EXPLOSION) {
             Player player = event.getEntity();
             if (recentBedExplosions.contains(player.getUniqueId())) {
                 event.deathMessage(Component.text().content(player.getName() + " was killed by [Intentional Game Design]").build());
-                // Remove the player from the set after handling
                 recentBedExplosions.remove(player.getUniqueId());
             }
         }
-        recentBedExplosions.remove(event.getEntity().getUniqueId());
     }
 
 
@@ -127,34 +149,45 @@ public class DayNightCycle implements Listener {
 
 
     public enum Stage {
-        DAY(0, Component.text("Day").color(NamedTextColor.YELLOW), Component.text("☀")),
-        SUNSET(12000, Component.text("Sunset").color(NamedTextColor.GOLD), Component.text("☀")),
-        TWILIGHT(13000, Component.text("Twilight").color(NamedTextColor.GOLD), Component.text("☀")),
-        MIDNIGHT(18000, Component.text("Midnight").color(NamedTextColor.DARK_BLUE), Component.text("☾")),
-        DOOMSDAY(21000, Component.text("Doomsday").color(NamedTextColor.DARK_RED), Component.text("☾")),
-        SUNRISE(23000, Component.text("Sunrise").color(NamedTextColor.GOLD), Component.text("☾"));
+        DAY(0, 12000, Component.text("Day").color(NamedTextColor.YELLOW), Component.text("☀").color(NamedTextColor.YELLOW)),
+        SUNSET(12000, 13000, Component.text("Sunset").color(NamedTextColor.GOLD), Component.text("☀").color(NamedTextColor.GOLD)),
+
+        TWILIGHT(13000, 17000, Component.text("Twilight").color(NamedTextColor.AQUA), Component.text("☾").color(NamedTextColor.AQUA)),
+        MIDNIGHT(17000, 21000, Component.text("Midnight").color(NamedTextColor.DARK_BLUE), Component.text("☾").color(NamedTextColor.BLUE)),
+        DOOMSDAY(21000, 23000, Component.text("Doomsday").color(NamedTextColor.DARK_RED), Component.text("☾").color(NamedTextColor.RED)),
+        SUNRISE(23000, 24000, Component.text("Sunrise").color(NamedTextColor.GOLD), Component.text("☀").color(NamedTextColor.GOLD)); // Minecraft day is 24000 ticks
 
         private final long startTime;
+        private final long endTime;
         private final Component displayName;
         private final Component icon;
 
-        Stage(long startTime, Component displayName, Component icon) {
+        Stage(long startTime, long endTime, Component displayName, Component icon) {
             this.startTime = startTime;
+            this.endTime = endTime;
             this.displayName = displayName;
             this.icon = icon;
+        }
+
+        public static @Nullable Stage getStage(long time) {
+            for (Stage stage : Stage.values()) {
+                if (time >= stage.getStartTime() && time < stage.getEndTime()) {
+                    return stage;
+                }
+            }
+            // Handle wrap-around for a new day
+            if (time >= 0 && time < DAY.getStartTime()) {
+                return SUNRISE;
+            }
+            return null;
         }
 
         public long getStartTime() {
             return this.startTime;
         }
 
-        public static @Nullable Stage getStage(long time) {
-            for (Stage stage : Stage.values()) {
-                if (time >= stage.getStartTime() && time < stage.getStartTime() + 12000) {
-                    return stage;
-                }
-            }
-            return null;
+        public long getEndTime() {
+            return this.endTime;
         }
 
         public Component getDisplayName() {
