@@ -7,10 +7,12 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.CreatureSpawnEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
 
 public class MobEnhancer implements Listener {
     private final EnhancedNights plugin;
@@ -25,14 +27,24 @@ public class MobEnhancer implements Listener {
 
     @EventHandler
     public void onMobSpawn(CreatureSpawnEvent event){
-        // send mob damage before and after modification to nearbly player
+        updateEntityLevel(event.getEntity());
+    }
 
+    @EventHandler
+    public void onChunkLoad(ChunkLoadEvent event) {
+        for (Entity entity : event.getChunk().getEntities()) {
+            if (entity instanceof LivingEntity) {
+                updateEntityLevel((LivingEntity) entity);
+            }
+        }
+    }
+
+    private void updateEntityLevel(LivingEntity entity) {
         boolean isNight = plugin.getDayNightCycle().isNight();
         int averageLevel = 0;
 
         if (skillsEnabled && isNight) {
-            // Calculate average skill level of nearby players if skills are enabled and it's night
-            int totalSkillLevels = event.getLocation().getNearbyPlayers(plugin.getConfig().getInt("mob_skill_radius")).stream()
+            int totalSkillLevels = entity.getLocation().getNearbyPlayers(plugin.getConfig().getInt("mob_skill_radius")).stream()
                     .mapToInt(player -> {
                         int playerSum = AureliumAPI.getSkillLevel(player, Skills.FIGHTING) +
                                 AureliumAPI.getSkillLevel(player, Skills.ARCHERY) +
@@ -41,7 +53,7 @@ public class MobEnhancer implements Listener {
                         return playerSum / 4;
                     }).sum();
 
-            int playerCount = event.getLocation().getNearbyPlayers(plugin.getConfig().getInt("mob_skill_radius")).size();
+            int playerCount = entity.getLocation().getNearbyPlayers(plugin.getConfig().getInt("mob_skill_radius")).size();
             if (playerCount > 0) {
                 averageLevel = totalSkillLevels / playerCount; // Calculate average skill level
             }
@@ -49,8 +61,25 @@ public class MobEnhancer implements Listener {
 
         // Apply night-time buffs if it's night, regardless of skillsEnabled
         if (isNight) {
-            applyNightTimeBuffs(event.getEntity(), averageLevel);
+            applyNightTimeBuffs(entity, averageLevel);
+            applyMoonPhaseEffects(entity);
+            setDisplayName(entity, averageLevel);
         }
+    }
+
+    private void setDisplayName(LivingEntity entity, int additionalLevel) {
+        entity.customName(Component.text()
+                .color(NamedTextColor.GOLD)
+                .content("Lvl " + additionalLevel)
+                .append(Component.text().color(NamedTextColor.DARK_GRAY).content(". | "))
+                .append(Component.text().color(NamedTextColor.WHITE).content(entity.getName()))
+                .append(Component.text().color(NamedTextColor.DARK_GRAY).content(" | "))
+                .append(Component.text().color(NamedTextColor.RED).content("❤ "))
+                .append(Component.text().color(NamedTextColor.WHITE).content(String.valueOf(Math.round(entity.getHealth()))))
+                .append(Component.text().color(NamedTextColor.DARK_GRAY).content("/"))
+                .append(Component.text().color(NamedTextColor.WHITE).content(String.valueOf(Math.round(entity.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue()))))
+                .build()
+        );
     }
 
     private void applyNightTimeBuffs(LivingEntity entity, int additionalLevel) {
@@ -69,12 +98,6 @@ public class MobEnhancer implements Listener {
         setAttribute(entity, Attribute.GENERIC_ATTACK_DAMAGE, scaledDamageMultiplier);
         setAttribute(entity, Attribute.GENERIC_MOVEMENT_SPEED, scaledSpeedMultiplier);
 
-        // add display name
-        entity.customName(Component.text()
-                .content("Level " + additionalLevel + " ")
-                .color(NamedTextColor.GRAY)
-                .append(Component.text(entity.getName())).build()
-        );
     }
 
     private void setAttribute(LivingEntity entity, Attribute attribute, double multiplier) {
@@ -82,7 +105,64 @@ public class MobEnhancer implements Listener {
         if (attributeInstance != null) {
             double newAttributeValue = attributeInstance.getValue() * multiplier;
             attributeInstance.setBaseValue(newAttributeValue);
+            if (attribute == Attribute.GENERIC_MAX_HEALTH) {
+                entity.setHealth(newAttributeValue);
+            }
         }
+    }
+    private void applyMoonPhaseEffects(LivingEntity entity) {
+        int moonPhase = entity.getWorld().getMoonPhase().ordinal();
+        double healthMultiplier, damageMultiplier, speedMultiplier;
+
+        switch (moonPhase) {
+            case 0:
+                healthMultiplier = 1.2;
+                damageMultiplier = 1.2;
+                speedMultiplier = 1.2;
+                break;
+            case 1:
+                healthMultiplier = 1.3;
+                damageMultiplier = 1.3;
+                speedMultiplier = 1.3;
+                break;
+            case 2:
+                healthMultiplier = 1.4;
+                damageMultiplier = 1.4;
+                speedMultiplier = 1.4;
+                break;
+            case 3:
+                healthMultiplier = 1.5;
+                damageMultiplier = 1.5;
+                speedMultiplier = 1.5;
+                break;
+            case 4:
+                healthMultiplier = 1.6;
+                damageMultiplier = 1.6;
+                speedMultiplier = 1.6;
+                break;
+            case 5:
+                healthMultiplier = 1.7;
+                damageMultiplier = 1.7;
+                speedMultiplier = 1.7;
+                break;
+            case 6:
+                healthMultiplier = 1.8;
+                damageMultiplier = 1.8;
+                speedMultiplier = 1.8;
+                break;
+            case 7:
+                // Reset the multipliers
+                healthMultiplier = 1.0;
+                damageMultiplier = 1.0;
+                speedMultiplier = 1.0;
+                break;
+            default:
+                return;
+        }
+
+        setAttribute(entity, Attribute.GENERIC_MAX_HEALTH, healthMultiplier);
+        setAttribute(entity, Attribute.GENERIC_ATTACK_DAMAGE, damageMultiplier);
+        setAttribute(entity, Attribute.GENERIC_MOVEMENT_SPEED, speedMultiplier);
     }
 
 }

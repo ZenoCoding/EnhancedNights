@@ -2,6 +2,7 @@ package me.tycho.enhancednights;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -16,6 +17,10 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityRegainHealthEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -34,7 +39,51 @@ public class DayNightCycle implements Listener {
     }
 
     public void update() {
-        stage = Stage.getStage(Objects.requireNonNull(Bukkit.getWorld("world")).getTime());
+
+        Stage s = Stage.getStage(Objects.requireNonNull(Bukkit.getWorld("world")).getTime());
+        if (s != stage){
+            changeStage(s);
+        }
+    }
+
+    private void changeStage(Stage s) {
+        this.stage = s;
+        switch (s) {
+            case DOOMSDAY:
+                for (Player player : Bukkit.getServer().getOnlinePlayers()) {
+                    applyEffectIfNotInMoonlight(player);
+                }
+                break;
+            // Add more cases as needed
+            // case OTHER_STAGE:
+            //     // Do something for OTHER_STAGE
+            //     break;
+            default:
+                for (Player player : Bukkit.getServer().getOnlinePlayers()) {
+                    player.removePotionEffect(PotionEffectType.HUNGER);
+                }
+                break;
+        }
+    }
+
+    private void applyEffectIfNotInMoonlight(Player player) {
+        if (player.getLocation().getBlock().getLightFromBlocks() < 4) {
+            player.addPotionEffect(new PotionEffect(PotionEffectType.HUNGER, Integer.MAX_VALUE, 1));
+        }
+    }
+
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        if (this.stage == Stage.DOOMSDAY) {
+            applyEffectIfNotInMoonlight(event.getPlayer());
+        }
+    }
+
+    @EventHandler
+    public void onPlayerRespawn(PlayerRespawnEvent event) {
+        if (this.stage == Stage.DOOMSDAY) {
+            applyEffectIfNotInMoonlight(event.getPlayer());
+        }
     }
 
     public Stage getStage() {
@@ -153,7 +202,7 @@ public class DayNightCycle implements Listener {
         SUNSET(12000, 13000, Component.text("Sunset").color(NamedTextColor.GOLD), Component.text("☀").color(NamedTextColor.GOLD)),
 
         TWILIGHT(13000, 17000, Component.text("Twilight").color(NamedTextColor.AQUA), Component.text("☾").color(NamedTextColor.AQUA)),
-        MIDNIGHT(17000, 21000, Component.text("Midnight").color(NamedTextColor.DARK_BLUE), Component.text("☾").color(NamedTextColor.BLUE)),
+        MIDNIGHT(17000, 21000, Component.text("Midnight").color(TextColor.color(0, 45, 94)), Component.text("☾").color(TextColor.color(0, 60, 115))),
         DOOMSDAY(21000, 23000, Component.text("Doomsday").color(NamedTextColor.DARK_RED), Component.text("☾").color(NamedTextColor.RED)),
         SUNRISE(23000, 24000, Component.text("Sunrise").color(NamedTextColor.GOLD), Component.text("☀").color(NamedTextColor.GOLD)); // Minecraft day is 24000 ticks
 
